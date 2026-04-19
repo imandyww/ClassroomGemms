@@ -11,7 +11,7 @@ class LmBootstrap {
   final DeviceTier tier;
 
   LmBootstrap({required this.tier, CactusLM? lm})
-      : lm = lm ?? CactusLM(enableToolFiltering: false);
+    : lm = lm ?? CactusLM(enableToolFiltering: false);
 
   /// Try gemma-4 int4 via the vendored modelPath bypass; fall back to a
   /// stock Cactus-hosted model if anything breaks.

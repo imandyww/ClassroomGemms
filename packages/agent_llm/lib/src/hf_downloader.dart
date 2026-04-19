@@ -80,16 +80,14 @@ Future<String> ensureGemma4({
   }
 
   final versions = await _resolveWeightVersionCandidates(spec.hfRepo);
-  debugPrint(
-      'hf_downloader: resolved $runtimeVersion -> candidates $versions');
+  debugPrint('hf_downloader: resolved $runtimeVersion -> candidates $versions');
 
   final zipPath = p.join(root.path, spec.weightsFilename);
   String? workingVersion;
   Object? lastError;
   for (final version in versions) {
     final url = spec.urlFor(version);
-    onProgress?.call(
-        0.0, 'Downloading ${spec.weightsFilename} ($version)...');
+    onProgress?.call(0.0, 'Downloading ${spec.weightsFilename} ($version)...');
     try {
       await _streamDownload(url, zipPath, onProgress);
       workingVersion = version;
@@ -113,14 +111,14 @@ Future<String> ensureGemma4({
 
   final version = workingVersion;
   try {
-
     onProgress?.call(
       _extractProgressStart,
       'Extracting ${spec.weightsFilename} on-device...',
     );
     await _extractZip(zipPath, extractedDir.path, onProgress);
-    await File(p.join(extractedDir.path, _readyMarker))
-        .writeAsString('$version\n${spec.weightsFilename}\n');
+    await File(
+      p.join(extractedDir.path, _readyMarker),
+    ).writeAsString('$version\n${spec.weightsFilename}\n');
   } catch (e) {
     // Best-effort cleanup of partials so a retry starts from a clean slate.
     try {
@@ -169,12 +167,13 @@ Future<List<String>> _resolveWeightVersionCandidates(String repoId) async {
         .map((t) => t['name'] as String?)
         .whereType<String>()
         .toList();
-    final compatible = tags
-        .map((name) => MapEntry(name, _parseVersionTag(name)))
-        .where((e) => e.value != null)
-        .where((e) => _compareVersions(e.value!, runtime) <= 0)
-        .toList()
-      ..sort((a, b) => _compareVersions(b.value!, a.value!));
+    final compatible =
+        tags
+            .map((name) => MapEntry(name, _parseVersionTag(name)))
+            .where((e) => e.value != null)
+            .where((e) => _compareVersions(e.value!, runtime) <= 0)
+            .toList()
+          ..sort((a, b) => _compareVersions(b.value!, a.value!));
     if (compatible.isEmpty) {
       debugPrint('hf_downloader: no tag ≤ $runtimeVersion; using main');
       return fallbackChain;
@@ -182,7 +181,8 @@ Future<List<String>> _resolveWeightVersionCandidates(String repoId) async {
     return [...compatible.map((e) => e.key), 'main'];
   } catch (e) {
     debugPrint(
-        'hf_downloader: resolveWeightVersionCandidates failed: $e; using main');
+      'hf_downloader: resolveWeightVersionCandidates failed: $e; using main',
+    );
     return fallbackChain;
   }
 }
@@ -258,15 +258,11 @@ Future<void> _extractZip(
   await Directory(destDir).create(recursive: true);
 
   final receivePort = ReceivePort();
-  final isolate = await Isolate.spawn<Map<String, Object?>>(
-    _extractZipEntry,
-    {
-      'zipPath': zipPath,
-      'destDir': destDir,
-      'sendPort': receivePort.sendPort,
-    },
-    debugName: 'gemma4-zip-extract',
-  );
+  final isolate = await Isolate.spawn<Map<String, Object?>>(_extractZipEntry, {
+    'zipPath': zipPath,
+    'destDir': destDir,
+    'sendPort': receivePort.sendPort,
+  }, debugName: 'gemma4-zip-extract');
 
   final completer = Completer<void>();
   late final StreamSubscription<dynamic> subscription;
@@ -275,7 +271,8 @@ Future<void> _extractZip(
     final type = message['type'];
     if (type == 'progress') {
       final stageProgress = (message['progress'] as num?)?.toDouble() ?? 0.0;
-      final progress = _extractProgressStart +
+      final progress =
+          _extractProgressStart +
           (_clampUnitInterval(stageProgress) * _extractProgressWeight);
       final status =
           message['status'] as String? ?? 'Extracting model files...';
@@ -292,9 +289,7 @@ Future<void> _extractZip(
       final error = message['error'] as String? ?? 'Unknown extraction error';
       final stack = message['stack'] as String?;
       completer.completeError(
-        Exception(
-          stack == null ? error : '$error\n$stack',
-        ),
+        Exception(stack == null ? error : '$error\n$stack'),
       );
     }
   });
@@ -345,7 +340,7 @@ Future<void> _extractZipEntry(Map<String, Object?> args) async {
         await Directory(outPath).create(recursive: true);
       } else {
         await Directory(p.dirname(outPath)).create(recursive: true);
-        await _extractZipFileEntry(zipPath, entry, outPath);
+        _extractZipFileEntry(zipPath, entry, outPath);
         processedBytes += entry.uncompressedSize;
       }
 
@@ -403,10 +398,7 @@ class _ZipDirectoryInfo {
   final int offset;
   final int size;
 
-  const _ZipDirectoryInfo({
-    required this.offset,
-    required this.size,
-  });
+  const _ZipDirectoryInfo({required this.offset, required this.size});
 }
 
 class _ZipEntryMeta {
@@ -467,12 +459,11 @@ List<_ZipEntryMeta> _readZipEntryMetadata(String zipPath) {
 
     return entries;
   } finally {
-    input.close();
+    input.closeSync();
   }
 }
 
 _ZipDirectoryInfo _readZipDirectoryInfo(InputFileStream input) {
-  final directory = ZipDirectory();
   final eocdOffset = _findEndOfCentralDirectoryOffset(input);
   if (eocdOffset < 0) {
     throw Exception('Could not find zip end-of-central-directory record.');
@@ -581,7 +572,10 @@ String? _findRootFolderName(List<_ZipEntryMeta> entries) {
   return candidate;
 }
 
-int _totalArchiveFileBytes(List<_ZipEntryMeta> entries, String? rootFolderName) {
+int _totalArchiveFileBytes(
+  List<_ZipEntryMeta> entries,
+  String? rootFolderName,
+) {
   var total = 0;
   for (final entry in entries) {
     if (entry.isDirectory || entry.isSymlink) continue;
@@ -593,11 +587,7 @@ int _totalArchiveFileBytes(List<_ZipEntryMeta> entries, String? rootFolderName) 
   return total;
 }
 
-Future<void> _extractZipFileEntry(
-  String zipPath,
-  _ZipEntryMeta entry,
-  String outPath,
-) async {
+void _extractZipFileEntry(String zipPath, _ZipEntryMeta entry, String outPath) {
   final input = InputFileStream(zipPath);
   try {
     input.setPosition(entry.localHeaderOffset);
@@ -615,7 +605,7 @@ Future<void> _extractZipFileEntry(
       output.closeSync();
     }
   } finally {
-    input.close();
+    input.closeSync();
   }
 }
 
@@ -631,7 +621,7 @@ String _readZipSymlinkTarget(String zipPath, _ZipEntryMeta entry) {
     zipFile.read(input);
     return utf8.decode(zipFile.getStream().toUint8List());
   } finally {
-    input.close();
+    input.closeSync();
   }
 }
 
