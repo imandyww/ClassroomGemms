@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:math';
 
 import 'package:archive/archive.dart';
 import 'package:archive/archive_io.dart';
@@ -20,8 +21,8 @@ const String runtimeVersion = 'v1.13.1';
 
 const String _readyMarker = '.cactus-ready';
 const double _downloadProgressWeight = 0.9;
-const double _extractProgressStart = 0.95;
-const double _extractProgressWeight = 0.04;
+const double _extractProgressStart = _downloadProgressWeight;
+const double _extractProgressWeight = 0.09;
 
 class HfGemma4Spec {
   final String slug;
@@ -78,14 +79,40 @@ Future<String> ensureGemma4({
     await extractedDir.delete(recursive: true);
   }
 
-  final version = await _resolveWeightVersion(spec.hfRepo);
-  final url = spec.urlFor(version);
-  debugPrint('hf_downloader: resolved $runtimeVersion -> $version; GET $url');
+  final versions = await _resolveWeightVersionCandidates(spec.hfRepo);
+  debugPrint(
+      'hf_downloader: resolved $runtimeVersion -> candidates $versions');
 
-  onProgress?.call(0.0, 'Downloading ${spec.weightsFilename} ($version)...');
   final zipPath = p.join(root.path, spec.weightsFilename);
+  String? workingVersion;
+  Object? lastError;
+  for (final version in versions) {
+    final url = spec.urlFor(version);
+    onProgress?.call(
+        0.0, 'Downloading ${spec.weightsFilename} ($version)...');
+    try {
+      await _streamDownload(url, zipPath, onProgress);
+      workingVersion = version;
+      break;
+    } catch (e) {
+      lastError = e;
+      debugPrint('hf_downloader: $version failed: $e');
+      // Clean up the partial zip so the next attempt starts fresh.
+      try {
+        final zip = File(zipPath);
+        if (await zip.exists()) await zip.delete();
+      } catch (_) {}
+    }
+  }
+
+  if (workingVersion == null) {
+    throw Exception(
+      'All version candidates failed for ${spec.hfRepo}: $lastError',
+    );
+  }
+
+  final version = workingVersion;
   try {
-    await _streamDownload(url, zipPath, onProgress);
 
     onProgress?.call(
       _extractProgressStart,
@@ -121,19 +148,20 @@ Future<bool> _looksExtracted(Directory dir) async {
   return File(p.join(dir.path, _readyMarker)).exists();
 }
 
-/// Port of `resolveWeightVersion` in cactus-react-native's `modelRegistry.js`.
-/// Returns the newest HF tag `vX.Y(.Z)?` that is ≤ [runtimeVersion]. Falls
-/// back to `'main'` if the refs endpoint is unreachable or has no compatible
-/// tags — so a transient HF API failure doesn't block first-run.
-Future<String> _resolveWeightVersion(String repoId) async {
+/// Returns an ordered list of HF refs to try: the newest compatible tag
+/// first, then each older compatible tag, then `'main'`. Used because the
+/// Cactus team sometimes cuts a tag without uploading the weights zip for
+/// every model variant — so a strict "newest tag only" policy 404s.
+Future<List<String>> _resolveWeightVersionCandidates(String repoId) async {
   final runtime = _parseVersionTag(runtimeVersion);
-  if (runtime == null) return 'main';
+  const fallbackChain = ['main'];
+  if (runtime == null) return fallbackChain;
   try {
     final uri = Uri.parse('https://huggingface.co/api/models/$repoId/refs');
     final resp = await http.get(uri).timeout(const Duration(seconds: 15));
     if (resp.statusCode != 200) {
       debugPrint('hf_downloader: refs HTTP ${resp.statusCode}; using main');
-      return 'main';
+      return fallbackChain;
     }
     final decoded = jsonDecode(resp.body) as Map<String, dynamic>;
     final tags = (decoded['tags'] as List<dynamic>? ?? const [])
@@ -149,12 +177,13 @@ Future<String> _resolveWeightVersion(String repoId) async {
       ..sort((a, b) => _compareVersions(b.value!, a.value!));
     if (compatible.isEmpty) {
       debugPrint('hf_downloader: no tag ≤ $runtimeVersion; using main');
-      return 'main';
+      return fallbackChain;
     }
-    return compatible.first.key;
+    return [...compatible.map((e) => e.key), 'main'];
   } catch (e) {
-    debugPrint('hf_downloader: resolveWeightVersion failed: $e; using main');
-    return 'main';
+    debugPrint(
+        'hf_downloader: resolveWeightVersionCandidates failed: $e; using main');
+    return fallbackChain;
   }
 }
 
@@ -284,7 +313,6 @@ Future<void> _extractZipEntry(Map<String, Object?> args) async {
   final destDir = args['destDir'] as String;
   final sendPort = args['sendPort'] as SendPort;
 
-  final input = InputFileStream(zipPath);
   try {
     sendPort.send({
       'type': 'progress',
@@ -292,36 +320,33 @@ Future<void> _extractZipEntry(Map<String, Object?> args) async {
       'status': 'Reading archive index...',
     });
 
-    final archive = ZipDecoder().decodeStream(input);
-    final rootFolderName = _findRootFolderName(archive);
-    final totalFileBytes = _totalArchiveFileBytes(archive, rootFolderName);
+    final entries = _readZipEntryMetadata(zipPath);
+    final rootFolderName = _findRootFolderName(entries);
+    final totalFileBytes = _totalArchiveFileBytes(entries, rootFolderName);
     final totalBytes = totalFileBytes > 0 ? totalFileBytes : 1;
-    final symlinks = <ArchiveFile>[];
+    final symlinks = <_ZipEntryMeta>[];
 
     var processedBytes = 0;
     var nextProgressAt = 0.01;
 
-    for (final file in archive) {
-      if (file.isSymbolicLink) {
-        symlinks.add(file);
+    for (final entry in entries) {
+      if (entry.isSymlink) {
+        symlinks.add(entry);
         continue;
       }
 
-      final rel = _relativeArchivePath(file.name, rootFolderName);
+      final rel = _relativeArchivePath(entry.archivePath, rootFolderName);
       if (rel.isEmpty) continue;
 
-      final outPath = p.join(destDir, rel);
-      if (file.isFile) {
-        await Directory(p.dirname(outPath)).create(recursive: true);
-        final out = OutputFileStream(outPath);
-        try {
-          file.writeContent(out);
-        } finally {
-          out.closeSync();
-        }
-        processedBytes += file.size;
-      } else {
+      final outPath = _resolveOutputPath(destDir, rel);
+      if (outPath == null) continue;
+
+      if (entry.isDirectory) {
         await Directory(outPath).create(recursive: true);
+      } else {
+        await Directory(p.dirname(outPath)).create(recursive: true);
+        await _extractZipFileEntry(zipPath, entry, outPath);
+        processedBytes += entry.uncompressedSize;
       }
 
       final fraction = processedBytes / totalBytes;
@@ -344,11 +369,19 @@ Future<void> _extractZipEntry(Map<String, Object?> args) async {
       });
     }
 
-    for (final file in symlinks) {
-      final rel = _relativeArchivePath(file.name, rootFolderName);
+    for (final entry in symlinks) {
+      final rel = _relativeArchivePath(entry.archivePath, rootFolderName);
       if (rel.isEmpty) continue;
-      final linkPath = p.join(destDir, rel);
-      await Link(linkPath).create(file.symbolicLink!, recursive: true);
+      final linkPath = _resolveOutputPath(destDir, rel);
+      if (linkPath == null) continue;
+
+      final linkTarget = _readZipSymlinkTarget(zipPath, entry);
+      if (!_isValidSymlinkTarget(destDir, linkPath, linkTarget)) {
+        continue;
+      }
+
+      await Directory(p.dirname(linkPath)).create(recursive: true);
+      await Link(linkPath).create(linkTarget, recursive: true);
     }
 
     sendPort.send({
@@ -363,29 +396,272 @@ Future<void> _extractZipEntry(Map<String, Object?> args) async {
       'error': e.toString(),
       'stack': st.toString(),
     });
+  }
+}
+
+class _ZipDirectoryInfo {
+  final int offset;
+  final int size;
+
+  const _ZipDirectoryInfo({
+    required this.offset,
+    required this.size,
+  });
+}
+
+class _ZipEntryMeta {
+  final String archivePath;
+  final int localHeaderOffset;
+  final int compressedSize;
+  final int uncompressedSize;
+  final int versionMadeBy;
+  final int unixMode;
+
+  const _ZipEntryMeta({
+    required this.archivePath,
+    required this.localHeaderOffset,
+    required this.compressedSize,
+    required this.uncompressedSize,
+    required this.versionMadeBy,
+    required this.unixMode,
+  });
+
+  bool get isDirectory =>
+      archivePath.endsWith('/') || archivePath.endsWith('\\');
+
+  bool get isSymlink {
+    if (isDirectory || (versionMadeBy >> 8) != 3) {
+      return false;
+    }
+    return (unixMode & 0xf000) == 0xa000;
+  }
+}
+
+List<_ZipEntryMeta> _readZipEntryMetadata(String zipPath) {
+  final input = InputFileStream(zipPath);
+  try {
+    final directoryInfo = _readZipDirectoryInfo(input);
+    final dirContent = input.subset(
+      position: directoryInfo.offset,
+      length: directoryInfo.size,
+      bufferSize: min(directoryInfo.size, 1024),
+    );
+
+    final entries = <_ZipEntryMeta>[];
+    while (!dirContent.isEOS) {
+      final signature = dirContent.readUint32();
+      if (signature != ZipFileHeader.signature) break;
+
+      final header = ZipFileHeader()..read(dirContent);
+      entries.add(
+        _ZipEntryMeta(
+          archivePath: header.filename,
+          localHeaderOffset: header.localHeaderOffset,
+          compressedSize: header.compressedSize,
+          uncompressedSize: header.uncompressedSize,
+          versionMadeBy: header.versionMadeBy,
+          unixMode: header.externalFileAttributes >> 16,
+        ),
+      );
+    }
+
+    return entries;
   } finally {
     input.close();
   }
 }
 
-String? _findRootFolderName(Archive archive) {
-  for (final file in archive) {
-    final pathParts = file.name.split('/');
-    if (pathParts.isNotEmpty) {
-      return pathParts.first;
+_ZipDirectoryInfo _readZipDirectoryInfo(InputFileStream input) {
+  final directory = ZipDirectory();
+  final eocdOffset = _findEndOfCentralDirectoryOffset(input);
+  if (eocdOffset < 0) {
+    throw Exception('Could not find zip end-of-central-directory record.');
+  }
+
+  input.setPosition(eocdOffset);
+  final signature = input.readUint32();
+  if (signature != ZipDirectory.eocdSignature) {
+    throw Exception('Invalid zip end-of-central-directory signature.');
+  }
+
+  input.readUint16(); // numberOfThisDisk
+  input.readUint16(); // diskWithTheStartOfTheCentralDirectory
+  input.readUint16(); // totalCentralDirectoryEntriesOnThisDisk
+  input.readUint16(); // totalCentralDirectoryEntries
+  var centralDirectorySize = input.readUint32();
+  var centralDirectoryOffset = input.readUint32();
+
+  final commentLength = input.readUint16();
+  if (commentLength > 0) {
+    input.readString(size: commentLength, utf8: false);
+  }
+
+  final zip64LocatorOffset = eocdOffset - ZipDirectory.zip64EocdLocatorSize;
+  if (zip64LocatorOffset >= 0) {
+    final zip64 = input.subset(
+      position: zip64LocatorOffset,
+      length: ZipDirectory.zip64EocdLocatorSize,
+    );
+    final zip64Signature = zip64.readUint32();
+    if (zip64Signature == ZipDirectory.zip64EocdLocatorSignature) {
+      zip64.readUint32(); // start disk
+      final zip64DirectoryOffset = zip64.readUint64();
+      zip64.readUint32(); // disk count
+
+      input.setPosition(zip64DirectoryOffset);
+      if (input.readUint32() == ZipDirectory.zip64EocdSignature) {
+        input.readUint64(); // record size
+        input.readUint16(); // version made by
+        input.readUint16(); // version needed
+        input.readUint32(); // disk number
+        input.readUint32(); // start disk
+        input.readUint64(); // entries on disk
+        input.readUint64(); // total entries
+        centralDirectorySize = input.readUint64();
+        centralDirectoryOffset = input.readUint64();
+      }
     }
+  }
+
+  return _ZipDirectoryInfo(
+    offset: centralDirectoryOffset,
+    size: centralDirectorySize,
+  );
+}
+
+int _findEndOfCentralDirectoryOffset(InputFileStream input) {
+  if (input.length <= 4) {
+    return -1;
+  }
+
+  final originalPosition = input.position;
+  final length = input.length - 4;
+  const bufferSize = 1024;
+  final chunkSize = min(length, bufferSize);
+
+  var startPos = length - chunkSize;
+  while (startPos >= 0) {
+    input.setPosition(startPos);
+    final chunk = InputMemoryStream(input.readBytes(chunkSize).toUint8List());
+    for (var chunkPos = chunkSize - 4; chunkPos >= 0; --chunkPos) {
+      chunk.setPosition(chunkPos);
+      if (chunk.readUint32() == ZipDirectory.eocdSignature) {
+        input.setPosition(originalPosition);
+        return startPos + chunkPos;
+      }
+    }
+
+    if (startPos > 0 && startPos < chunkSize) {
+      startPos = 0;
+    } else {
+      startPos -= chunkSize;
+    }
+  }
+
+  input.setPosition(originalPosition);
+  return -1;
+}
+
+String? _findRootFolderName(List<_ZipEntryMeta> entries) {
+  if (entries.isEmpty) return null;
+
+  String? candidate;
+  for (final entry in entries) {
+    final normalizedPath = entry.archivePath.replaceAll('\\', '/');
+    final slashIndex = normalizedPath.indexOf('/');
+    if (slashIndex <= 0) {
+      return null;
+    }
+    final root = normalizedPath.substring(0, slashIndex);
+    candidate ??= root;
+    if (root != candidate) {
+      return null;
+    }
+  }
+  return candidate;
+}
+
+int _totalArchiveFileBytes(List<_ZipEntryMeta> entries, String? rootFolderName) {
+  var total = 0;
+  for (final entry in entries) {
+    if (entry.isDirectory || entry.isSymlink) continue;
+    if (_relativeArchivePath(entry.archivePath, rootFolderName).isEmpty) {
+      continue;
+    }
+    total += entry.uncompressedSize;
+  }
+  return total;
+}
+
+Future<void> _extractZipFileEntry(
+  String zipPath,
+  _ZipEntryMeta entry,
+  String outPath,
+) async {
+  final input = InputFileStream(zipPath);
+  try {
+    input.setPosition(entry.localHeaderOffset);
+    final zipFile = ZipFile(
+      ZipFileHeader()
+        ..compressedSize = entry.compressedSize
+        ..uncompressedSize = entry.uncompressedSize,
+    );
+    zipFile.read(input);
+
+    final output = OutputFileStream(outPath, bufferSize: 256 * 1024);
+    try {
+      zipFile.decompress(output);
+    } finally {
+      output.closeSync();
+    }
+  } finally {
+    input.close();
+  }
+}
+
+String _readZipSymlinkTarget(String zipPath, _ZipEntryMeta entry) {
+  final input = InputFileStream(zipPath);
+  try {
+    input.setPosition(entry.localHeaderOffset);
+    final zipFile = ZipFile(
+      ZipFileHeader()
+        ..compressedSize = entry.compressedSize
+        ..uncompressedSize = entry.uncompressedSize,
+    );
+    zipFile.read(input);
+    return utf8.decode(zipFile.getStream().toUint8List());
+  } finally {
+    input.close();
+  }
+}
+
+String? _resolveOutputPath(String destDir, String relativePath) {
+  final normalizedRelative = p.normalize(relativePath);
+  if (normalizedRelative.isEmpty || normalizedRelative == '.') {
+    return null;
+  }
+
+  final outputPath = p.normalize(p.join(destDir, normalizedRelative));
+  final normalizedRoot = p.normalize(destDir);
+  if (outputPath == normalizedRoot || p.isWithin(normalizedRoot, outputPath)) {
+    return outputPath;
   }
   return null;
 }
 
-int _totalArchiveFileBytes(Archive archive, String? rootFolderName) {
-  var total = 0;
-  for (final file in archive) {
-    if (!file.isFile) continue;
-    if (_relativeArchivePath(file.name, rootFolderName).isEmpty) continue;
-    total += file.size;
+bool _isValidSymlinkTarget(
+  String outputRoot,
+  String linkPath,
+  String targetPath,
+) {
+  if (targetPath.isEmpty || p.isAbsolute(targetPath)) {
+    return false;
   }
-  return total;
+
+  final resolvedTarget = p.normalize(p.join(p.dirname(linkPath), targetPath));
+  final normalizedRoot = p.normalize(outputRoot);
+  return resolvedTarget == normalizedRoot ||
+      p.isWithin(normalizedRoot, resolvedTarget);
 }
 
 String _relativeArchivePath(String archivePath, String? rootFolderName) {

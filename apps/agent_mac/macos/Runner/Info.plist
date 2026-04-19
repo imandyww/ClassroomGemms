@@ -30,5 +30,11 @@
 	<string>NSApplication</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>agent_mac records your voice to transcribe push-to-talk commands locally.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>agent_mac uses AppleScript to add events to your Calendar when you ask it to schedule something.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>agent_mac adds events to your Calendar when you ask it to schedule something.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>agent_mac adds events to your Calendar when you ask it to schedule something.</string>
 </dict>
 </plist>

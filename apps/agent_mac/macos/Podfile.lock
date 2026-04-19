@@ -12,6 +12,9 @@ PODS:
     - ObjectBox (= 5.1.1)
   - package_info_plus (0.0.1):
     - FlutterMacOS
+  - path_provider_foundation (0.0.1):
+    - Flutter
+    - FlutterMacOS
   - record_macos (1.2.0):
     - FlutterMacOS
   - screen_capturer_macos (0.0.1):
@@ -27,6 +30,7 @@ DEPENDENCIES:
   - FlutterMacOS (from `Flutter/ephemeral`)
   - objectbox_flutter_libs (from `Flutter/ephemeral/.symlinks/plugins/objectbox_flutter_libs/macos`)
   - package_info_plus (from `Flutter/ephemeral/.symlinks/plugins/package_info_plus/macos`)
+  - path_provider_foundation (from `Flutter/ephemeral/.symlinks/plugins/path_provider_foundation/darwin`)
   - record_macos (from `Flutter/ephemeral/.symlinks/plugins/record_macos/macos`)
   - screen_capturer_macos (from `Flutter/ephemeral/.symlinks/plugins/screen_capturer_macos/macos`)
   - shared_preferences_foundation (from `Flutter/ephemeral/.symlinks/plugins/shared_preferences_foundation/darwin`)
@@ -48,6 +52,8 @@ EXTERNAL SOURCES:
     :path: Flutter/ephemeral/.symlinks/plugins/objectbox_flutter_libs/macos
   package_info_plus:
     :path: Flutter/ephemeral/.symlinks/plugins/package_info_plus/macos
+  path_provider_foundation:
+    :path: Flutter/ephemeral/.symlinks/plugins/path_provider_foundation/darwin
   record_macos:
     :path: Flutter/ephemeral/.symlinks/plugins/record_macos/macos
   screen_capturer_macos:
@@ -63,6 +69,7 @@ SPEC CHECKSUMS:
   ObjectBox: 26871f7cce80a8bd2e610bf944aeaded730f6925
   objectbox_flutter_libs: 5aac4de1c44d8b95362cb46f2d2acfe4da7c5d63
   package_info_plus: f0052d280d17aa382b932f399edf32507174e870
+  path_provider_foundation: bb55f6dbba17d0dccd6737fe6f7f34fbd0376880
   record_macos: 7f227161b93c49e7e34fe681c5891c8622c8cc8b
   screen_capturer_macos: 229306903c56767a7c7d3a48167ba303e95c6d29
   shared_preferences_foundation: 7036424c3d8ec98dfe75ff1667cb0cd531ec82bb

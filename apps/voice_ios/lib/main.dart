@@ -45,6 +45,7 @@ class _Home extends StatefulWidget {
 
 class _HomeState extends State<_Home> {
   final _textCtrl = TextEditingController(text: 'Hello from my phone');
+  final _manualIpCtrl = TextEditingController();
 
   IosCore get core => widget.core;
 
@@ -81,6 +82,7 @@ class _HomeState extends State<_Home> {
               const Divider(height: 32),
               const Text('Discovered Macs / peers:'),
               Expanded(child: _peerList()),
+              _manualIpRow(),
               const SizedBox(height: 8),
               TextField(
                 controller: _textCtrl,
@@ -108,12 +110,23 @@ class _HomeState extends State<_Home> {
       onTapDown: (_) => core.startRecording(),
       onTapUp: (_) async {
         final transcript = await core.stopRecordingAndTranscribe();
-        if (transcript != null && transcript.trim().isNotEmpty) {
-          _textCtrl.text = transcript;
-          final peers = core.discoveredPeers;
-          if (peers.isNotEmpty) {
-            await core.sendIntentTo(peers.first, transcript);
+        if (transcript == null || transcript.trim().isEmpty) return;
+        _textCtrl.text = transcript;
+        final peer = core.preferredPeer;
+        if (peer == null) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text(
+                  'No Mac peer found. Make sure agent_mac is running on the same Wi-Fi.'),
+            ));
           }
+          return;
+        }
+        final res = await core.sendIntentTo(peer, transcript);
+        if (res == null && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Send to ${peer.alias} failed — see log.'),
+          ));
         }
       },
       onTapCancel: () => core.stopRecordingAndTranscribe(),
@@ -152,6 +165,39 @@ class _HomeState extends State<_Home> {
       },
       separatorBuilder: (_, _) => const Divider(height: 1),
       itemCount: peers.length,
+    );
+  }
+
+  Widget _manualIpRow() {
+    return Row(
+      children: [
+        Expanded(
+          child: TextField(
+            controller: _manualIpCtrl,
+            keyboardType: TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(
+              labelText: 'Mac IP (e.g., 192.168.1.5)',
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        FilledButton.tonal(
+          onPressed: () async {
+            final ip = _manualIpCtrl.text.trim();
+            if (ip.isEmpty) return;
+            final ok = await core.addManualPeer(ip);
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(ok
+                  ? 'Added $ip as a peer.'
+                  : 'Could not reach $ip — check Mac is running and IP is right.'),
+            ));
+          },
+          child: const Text('Add'),
+        ),
+      ],
     );
   }
 

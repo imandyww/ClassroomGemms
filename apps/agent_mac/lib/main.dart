@@ -105,6 +105,13 @@ class _HomeScreenState extends State<_HomeScreen> {
             Text('Server: ${core.server == null ? "starting" : "listening :${LanConst.port}"}'),
             Text('Fingerprint: ${core.identity?.fingerprint.substring(0, 16) ?? "-"}...'),
             Text('Model: ${core.loadedModel?.slug ?? "(not loaded)"} via ${core.loadedModel?.sourceLabel ?? "-"}'),
+            if (core.localIps.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              const Text('LAN IPs (type one on iPhone if Simulator):',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+              ...core.localIps.map((ip) => SelectableText('  • $ip:${LanConst.port}',
+                  style: const TextStyle(fontFamily: 'Menlo', fontSize: 12))),
+            ],
           ]),
           _section('LLM', [
             Wrap(

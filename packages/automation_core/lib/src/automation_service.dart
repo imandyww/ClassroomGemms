@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:bixat_key_mouse/bixat_key_mouse.dart';
@@ -136,5 +137,169 @@ class AutomationService {
       'user_response': null,
       'question': question,
     };
+  }
+
+  /// Create an event in the user's macOS Calendar via AppleScript.
+  ///
+  /// [date] must be ISO "YYYY-MM-DD". [startTime] is 24h "HH:MM" (default "09:00").
+  /// [durationMinutes] defaults to 30. If [allDay] is true, the event spans the
+  /// whole calendar day and time fields are ignored. If [calendarName] is empty,
+  /// the first calendar in Calendar.app is used.
+  Future<Map<String, dynamic>> createCalendarEvent({
+    required String title,
+    required String date,
+    String startTime = '09:00',
+    int durationMinutes = 30,
+    String notes = '',
+    String calendarName = '',
+    bool allDay = false,
+  }) async {
+    if (!Platform.isMacOS) {
+      return {
+        'success': false,
+        'message': 'createCalendarEvent is only supported on macOS.',
+      };
+    }
+
+    // Validate date — "YYYY-MM-DD".
+    final dateMatch = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$').firstMatch(date.trim());
+    if (dateMatch == null) {
+      return {
+        'success': false,
+        'message': 'date must be "YYYY-MM-DD" (got "$date").',
+      };
+    }
+    final year = int.parse(dateMatch.group(1)!);
+    final month = int.parse(dateMatch.group(2)!);
+    final day = int.parse(dateMatch.group(3)!);
+
+    // Validate start time — "HH:MM" 24h.
+    int startHour = 9;
+    int startMinute = 0;
+    if (!allDay) {
+      final timeMatch = RegExp(r'^(\d{1,2}):(\d{2})$').firstMatch(startTime.trim());
+      if (timeMatch == null) {
+        return {
+          'success': false,
+          'message': 'startTime must be "HH:MM" 24h (got "$startTime").',
+        };
+      }
+      startHour = int.parse(timeMatch.group(1)!);
+      startMinute = int.parse(timeMatch.group(2)!);
+      if (startHour < 0 || startHour > 23 || startMinute < 0 || startMinute > 59) {
+        return {
+          'success': false,
+          'message': 'startTime out of range (got "$startTime").',
+        };
+      }
+    }
+
+    final durationSeconds = (durationMinutes <= 0 ? 30 : durationMinutes) * 60;
+
+    // AppleScript reads args via `on run argv`. We pass everything as argv
+    // strings (no in-script concatenation, no quoting hell).
+    const script = r'''
+on run argv
+  set theTitle to item 1 of argv
+  set theNotes to item 2 of argv
+  set calName to item 3 of argv
+  set yearArg to (item 4 of argv) as integer
+  set monthArg to (item 5 of argv) as integer
+  set dayArg to (item 6 of argv) as integer
+  set hourArg to (item 7 of argv) as integer
+  set minArg to (item 8 of argv) as integer
+  set durSeconds to (item 9 of argv) as integer
+  set allDayFlag to (item 10 of argv) as text
+
+  -- Build the start date carefully: set day=1 first so changing month/year
+  -- can't roll the date over (e.g., Jan 31 + month=Feb → Mar 3 in AppleScript).
+  set theStart to current date
+  set day of theStart to 1
+  set hours of theStart to 0
+  set minutes of theStart to 0
+  set seconds of theStart to 0
+  set year of theStart to yearArg
+  set month of theStart to monthArg
+  set day of theStart to dayArg
+  if allDayFlag is not "true" then
+    set hours of theStart to hourArg
+    set minutes of theStart to minArg
+  end if
+  set theEnd to theStart + durSeconds
+
+  tell application "Calendar"
+    activate
+    if calName is "" then
+      set theCal to first calendar whose writable is true
+    else
+      try
+        set theCal to first calendar whose name is calName
+      on error
+        set theCal to first calendar whose writable is true
+      end try
+    end if
+    tell theCal
+      if allDayFlag is "true" then
+        set newEvent to make new event with properties {summary:theTitle, start date:theStart, end date:(theStart + (24 * hours)), allday event:true, description:theNotes}
+      else
+        set newEvent to make new event with properties {summary:theTitle, start date:theStart, end date:theEnd, description:theNotes}
+      end if
+      return (name of theCal) & "|" & (summary of newEvent) & "|" & ((start date of newEvent) as string)
+    end tell
+  end tell
+end run
+''';
+
+    // Write the AppleScript to a temp file and invoke it with argv.
+    try {
+      final tmp = await File(
+        '${Directory.systemTemp.path}/agent_mac_calendar_${DateTime.now().millisecondsSinceEpoch}.applescript',
+      ).writeAsString(script);
+
+      final result = await Process.run(
+        '/usr/bin/osascript',
+        [
+          tmp.path,
+          title,
+          notes,
+          calendarName,
+          '$year',
+          '$month',
+          '$day',
+          '$startHour',
+          '$startMinute',
+          '$durationSeconds',
+          allDay ? 'true' : 'false',
+        ],
+        stdoutEncoding: const SystemEncoding(),
+        stderrEncoding: const SystemEncoding(),
+      ).timeout(const Duration(seconds: 20));
+
+      // best-effort cleanup
+      try { await tmp.delete(); } catch (_) {}
+
+      if (result.exitCode != 0) {
+        return {
+          'success': false,
+          'message': 'osascript failed (${result.exitCode}): ${result.stderr.toString().trim()}',
+        };
+      }
+      final out = result.stdout.toString().trim();
+      return {
+        'success': true,
+        'message': 'Event created.',
+        'detail': out,
+        'title': title,
+        'date': date,
+        'startTime': allDay ? null : startTime,
+        'durationMinutes': allDay ? null : durationMinutes,
+        'allDay': allDay,
+      };
+    } catch (e) {
+      return {
+        'success': false,
+        'message': 'createCalendarEvent error: $e',
+      };
+    }
   }
 }

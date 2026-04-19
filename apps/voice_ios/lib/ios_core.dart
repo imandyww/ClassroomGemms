@@ -1,3 +1,7 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:agent_llm/agent_llm.dart';
 import 'package:agent_protocol/agent_protocol.dart';
 import 'package:cactus/cactus.dart';
@@ -20,6 +24,21 @@ class IosCore extends ChangeNotifier {
   final Map<String, LanPeer> _discovered = {};
   List<LanPeer> get discoveredPeers => _discovered.values.toList()
     ..sort((a, b) => b.lastSeen.compareTo(a.lastSeen));
+
+  /// Best peer for forwarding a voice intent: prefer paired/trusted Macs, then
+  /// any desktop peer, then the most recently seen peer of any kind.
+  LanPeer? get preferredPeer {
+    final peers = discoveredPeers;
+    if (peers.isEmpty) return null;
+    final trustedDesktop = peers.firstWhere(
+      (p) => p.deviceType == 'desktop' && (pairing?.isTrusted(p.fingerprint) ?? false),
+      orElse: () => peers.firstWhere(
+        (p) => p.deviceType == 'desktop',
+        orElse: () => peers.first,
+      ),
+    );
+    return trustedDesktop;
+  }
 
   final List<String> log = [];
   IntentResponse? lastResponse;
@@ -100,7 +119,22 @@ class IosCore extends ChangeNotifier {
     final r = recorder;
     final stt = sttBoot;
     if (r == null || stt == null) return null;
-    final path = await r.stop();
+    String? path;
+    try {
+      path = await r.stop().timeout(const Duration(seconds: 3));
+    } on TimeoutException {
+      _append('Recorder stop timed out — resetting recorder.');
+      isRecording = false;
+      recorder = MicRecorder();
+      notifyListeners();
+      unawaited(r.dispose().catchError((_) {}));
+      return null;
+    } catch (e) {
+      _append('Recorder stop failed: $e');
+      isRecording = false;
+      notifyListeners();
+      return null;
+    }
     isRecording = false;
     notifyListeners();
     if (path == null) {
@@ -110,7 +144,10 @@ class IosCore extends ChangeNotifier {
     if (!sttReady) {
       _append('STT not ready; loading now...');
       await loadStt();
-      if (!sttReady) return null;
+      if (!sttReady) {
+        _append('STT still not ready, aborting transcribe.');
+        return null;
+      }
     }
     try {
       _append('Transcribing...');
@@ -170,6 +207,48 @@ You sit between the user's voice and a desktop automation agent. Your only job i
       _append('Normalization failed: $e (forwarding raw text)');
     }
     return raw;
+  }
+
+  /// Manually add a Mac peer by IP, bypassing multicast. Useful when iOS is
+  /// running in the Simulator (which can't cross multicast) or when the LAN
+  /// drops UDP. Probes /api/localsend/v2/info to grab the peer's real
+  /// fingerprint/alias before injecting it.
+  Future<bool> addManualPeer(String ipInput) async {
+    final ip = ipInput.trim();
+    if (ip.isEmpty) {
+      _append('addManualPeer: empty IP.');
+      return false;
+    }
+    final uri = Uri.parse('http://$ip:${LanConst.port}/api/localsend/v2/info');
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+    try {
+      _append('Probing $uri ...');
+      final req = await client.getUrl(uri).timeout(const Duration(seconds: 4));
+      final resp = await req.close().timeout(const Duration(seconds: 4));
+      if (resp.statusCode != 200) {
+        _append('Manual probe failed: HTTP ${resp.statusCode}');
+        return false;
+      }
+      final body = await resp.transform(utf8.decoder).join();
+      final json = jsonDecode(body) as Map<String, dynamic>;
+      final peer = LanPeer(
+        alias: (json['alias'] as String?) ?? 'Mac@$ip',
+        fingerprint: (json['fingerprint'] as String?) ?? 'manual-$ip',
+        ip: ip,
+        port: (json['port'] as num?)?.toInt() ?? LanConst.port,
+        deviceType: (json['deviceType'] as String?) ?? 'desktop',
+        lastSeen: DateTime.now(),
+      );
+      _discovered[peer.fingerprint] = peer;
+      _append('Added manual peer ${peer.alias} @ ${peer.ip}');
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _append('Manual probe failed: $e');
+      return false;
+    } finally {
+      client.close(force: true);
+    }
   }
 
   Future<IntentResponse?> sendIntentTo(LanPeer peer, String text) async {

@@ -55,20 +55,20 @@ class IsolateTaskStreamResult<T> {
   IsolateTaskStreamResult.event({
     required this.id,
     required this.data,
-  })  : done = false,
-        error = null;
+  }) : done = false,
+       error = null;
 
   IsolateTaskStreamResult.done({
     required this.id,
-  })  : done = true,
-        data = null,
-        error = null;
+  }) : done = true,
+       data = null,
+       error = null;
 
   IsolateTaskStreamResult.error({
     required this.id,
     required this.error,
-  })  : done = true,
-        data = null;
+  }) : done = true,
+       data = null;
 }
 
 /// A special data payload to acknowledge the reception of a stream event.
@@ -76,8 +76,8 @@ class IsolateTaskStreamAckResult<T> extends IsolateTaskStreamResult<T> {
   IsolateTaskStreamAckResult({
     required super.id,
   }) : super._(
-          data: null,
-          done: false,
-          error: null,
-        );
+         data: null,
+         done: false,
+         error: null,
+       );
 }

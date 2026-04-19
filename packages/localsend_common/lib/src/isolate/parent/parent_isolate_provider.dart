@@ -35,11 +35,11 @@ class ParentIsolateState with ParentIsolateStateMappable {
   });
 
   static ParentIsolateState initial(SyncState syncState) => ParentIsolateState(
-        syncState: syncState,
-        httpScanDiscovery: null,
-        multicastDiscovery: null,
-        httpUpload: [],
-      );
+    syncState: syncState,
+    httpScanDiscovery: null,
+    multicastDiscovery: null,
+    httpUpload: [],
+  );
 
   @override
   String toString() {
@@ -102,13 +102,15 @@ class IsolateSetupAction extends AsyncReduxAction<IsolateController, ParentIsola
         );
 
         if (uriContentStreamResolver != null) {
-          httpUpload.sendToIsolate(SendToIsolateData(
-            syncState: null,
-            data: IsolateTask(
-              id: -1,
-              data: HttpUploadSetContentStreamResolverTask(resolver: uriContentStreamResolver!),
+          httpUpload.sendToIsolate(
+            SendToIsolateData(
+              syncState: null,
+              data: IsolateTask(
+                id: -1,
+                data: HttpUploadSetContentStreamResolverTask(resolver: uriContentStreamResolver!),
+              ),
             ),
-          ));
+          );
         }
 
         return httpUpload;

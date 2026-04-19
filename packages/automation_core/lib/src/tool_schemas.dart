@@ -152,4 +152,52 @@ List<Map<String, dynamic>> buildToolSchemas() => [
           },
         },
       },
+      {
+        'type': 'function',
+        'function': {
+          'name': 'createCalendarEvent',
+          'description':
+              'Creates an event in the user\'s macOS Calendar app via AppleScript. Use this for any request to schedule, remind, book, or add something to the calendar — including prescription pickups, appointments, meetings, and reminders. Much more reliable than clicking through Calendar.app with mouse/keyboard.',
+          'parameters': {
+            'type': 'object',
+            'properties': {
+              'title': {
+                'type': 'string',
+                'description': 'Short event title (e.g., "Pick up prescription", "Doctor appointment").',
+              },
+              'date': {
+                'type': 'string',
+                'description':
+                    'ISO date YYYY-MM-DD. You MUST resolve relative words like "today", "tomorrow", "Thursday", "next Monday" into a concrete date yourself using the "Today is ..." line in the system prompt.',
+              },
+              'startTime': {
+                'type': 'string',
+                'description':
+                    '24-hour start time HH:MM (e.g., "09:00", "14:30"). Optional — defaults to "09:00". Ignored if allDay is true.',
+              },
+              'durationMinutes': {
+                'type': 'integer',
+                'description':
+                    'Event duration in minutes. Optional — defaults to 30. Ignored if allDay is true.',
+              },
+              'notes': {
+                'type': 'string',
+                'description':
+                    'Free-form notes/description for the event (e.g., the original voice transcript). Optional.',
+              },
+              'calendarName': {
+                'type': 'string',
+                'description':
+                    'Name of the calendar to add the event to. Optional — defaults to the first writable calendar.',
+              },
+              'allDay': {
+                'type': 'boolean',
+                'description':
+                    'If true, creates an all-day event (startTime / durationMinutes are ignored). Optional — defaults to false.',
+              },
+            },
+            'required': ['title', 'date'],
+          },
+        },
+      },
     ];

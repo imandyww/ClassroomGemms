@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:agent_llm/agent_llm.dart';
 import 'package:agent_protocol/agent_protocol.dart';
@@ -31,6 +32,31 @@ class AgentCore extends ChangeNotifier {
   List<LanPeer> get discoveredPeers => _discovered.values.toList()
     ..sort((a, b) => b.lastSeen.compareTo(a.lastSeen));
   List<LanPeer> get pairedPeers => pairing?.all() ?? const [];
+
+  /// Non-loopback IPv4 addresses, so the user can read them off the UI and
+  /// punch one into the iOS Simulator's "Connect to Mac" field (multicast
+  /// doesn't cross the Simulator boundary).
+  List<String> localIps = const [];
+
+  Future<void> refreshLocalIps() async {
+    try {
+      final interfaces = await NetworkInterface.list(
+        type: InternetAddressType.IPv4,
+        includeLoopback: false,
+        includeLinkLocal: false,
+      );
+      final ips = <String>[];
+      for (final iface in interfaces) {
+        for (final addr in iface.addresses) {
+          ips.add(addr.address);
+        }
+      }
+      localIps = ips;
+      notifyListeners();
+    } catch (e) {
+      _append('refreshLocalIps failed: $e');
+    }
+  }
 
   final List<String> log = [];
   final StreamController<LanPeer> pairRequests = StreamController.broadcast();
@@ -85,19 +111,40 @@ class AgentCore extends ChangeNotifier {
       _append('Multicast failed: $e (unicast still works)');
     }
 
+    // Best-effort: surface local IPs so user can type one on the iPhone.
+    unawaited(refreshLocalIps());
+
     notifyListeners();
   }
 
-  static const _systemPrompt = '''
-You are a macOS automation agent. You receive high-level natural-language intents and satisfy them by calling the provided tools on the user's Mac.
+  static String _buildSystemPrompt() {
+    final now = DateTime.now();
+    final iso =
+        '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    const weekdays = [
+      'Monday', 'Tuesday', 'Wednesday', 'Thursday',
+      'Friday', 'Saturday', 'Sunday',
+    ];
+    final weekday = weekdays[now.weekday - 1];
+    return '''
+You are a macOS automation agent. You receive high-level natural-language intents (often transcribed from a phone PTT button) and satisfy them by calling the provided tools on the user's Mac.
 
-Rules:
-- Prefer keyboard shortcuts (pressKeys) over vision and mouse coordinates when possible. For example, use cmd+space to open Spotlight, cmd+t to open a new tab, etc.
-- Break multi-step intents into a sequence of tool calls.
-- When the intent is fully done, respond with a short natural-language summary and no tool calls.
+Today is $iso ($weekday). Use this to resolve relative dates the user mentions ("today", "tomorrow", "Thursday", "next Monday", "in two weeks") into absolute YYYY-MM-DD values. When the user says a weekday, pick the next occurrence of that weekday strictly after today.
+
+Routing rules — pick the most direct tool, do not improvise:
+- For ANY scheduling, reminder, appointment, prescription pickup, or "add to calendar" request → call `createCalendarEvent` ONCE with a clean title and a resolved ISO date. Do NOT open Calendar.app via Spotlight; do NOT click. Examples that match this rule: "Prescribed some medicine for pickup on Thursday", "Add dentist appointment next Tuesday at 2pm", "Remind me to call mom on Friday".
+- For everything else, prefer keyboard shortcuts (`pressKeys`) over mouse/vision. Use cmd+space for Spotlight, cmd+t for new tab, etc.
 - Keys for pressKeys must be UniversalKey enum names (e.g., "leftCommand", "space", "t", "return", "leftShift").
-- If a tool returns {"success": false}, adapt: try an alternative approach or abort with an explanation.
+- Break multi-step intents into a sequence of tool calls.
+- When the intent is fully done, respond with a short natural-language summary and NO tool calls.
+- If a tool returns {"success": false}, adapt: try an alternative approach or abort with a clear explanation.
+
+Calendar tool tips:
+- Default startTime is 09:00 and durationMinutes is 30 — only override if the user gave a time.
+- Set `notes` to the original user transcript so they can find context later.
+- Title should be short and imperative ("Pick up prescription", "Doctor appointment"), not a full sentence.
 ''';
+  }
 
   Future<IntentResponse> _handleIntent(IntentRequest req, LanPeer from) async {
     _append('Intent from ${from.alias}: "${req.text}"');
@@ -117,7 +164,7 @@ Rules:
 
     final run = await react.run(
       messages: [
-        ChatMessage(role: 'system', content: _systemPrompt),
+        ChatMessage(role: 'system', content: _buildSystemPrompt()),
         ChatMessage(role: 'user', content: req.text),
       ],
       tools: d.buildTools(),

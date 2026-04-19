@@ -42,9 +42,28 @@ class AutomationDispatcher {
         return service.getShortcuts(query: (args['query'] ?? '').toString());
       case 'askUser':
         return service.askUser(question: (args['question'] ?? '').toString());
+      case 'createCalendarEvent':
+        return service.createCalendarEvent(
+          title: (args['title'] ?? '').toString(),
+          date: (args['date'] ?? '').toString(),
+          startTime: (args['startTime'] ?? '09:00').toString(),
+          durationMinutes: _asInt(args['durationMinutes']) ?? 30,
+          notes: (args['notes'] ?? '').toString(),
+          calendarName: (args['calendarName'] ?? '').toString(),
+          allDay: _asBool(args['allDay']) ?? false,
+        );
       default:
         return {'success': false, 'message': 'Unknown tool: $name'};
     }
+  }
+
+  bool? _asBool(dynamic v) {
+    if (v == null) return null;
+    if (v is bool) return v;
+    final s = v.toString().toLowerCase().trim();
+    if (s == 'true' || s == '1' || s == 'yes') return true;
+    if (s == 'false' || s == '0' || s == 'no') return false;
+    return null;
   }
 
   int? _asInt(dynamic v) {

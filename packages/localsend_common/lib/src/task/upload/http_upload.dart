@@ -27,7 +27,10 @@ class HttpUploadService {
     await _client.postStream(
       uri: ApiRoute.upload.target(target),
       query: {
-        ?'sessionId': remoteSessionId,
+        ...?switch (remoteSessionId) {
+          final sessionId? => {'sessionId': sessionId},
+          null => null,
+        },
         'fileId': fileId,
         'token': token,
       },
