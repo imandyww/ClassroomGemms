@@ -64,11 +64,16 @@ Future<String> ensureGemma4({
 }) async {
   final appSupport = await getApplicationSupportDirectory();
   final root = Directory(p.join(appSupport.path, 'gemma4_weights'));
+  _assertSafeModelStoragePath(root.path, purpose: 'store Gemma weights');
   if (!await root.exists()) {
     await root.create(recursive: true);
   }
 
   final extractedDir = Directory(p.join(root.path, spec.slug));
+  _assertSafeModelStoragePath(
+    extractedDir.path,
+    purpose: 'extract Gemma weights',
+  );
   if (await _looksExtracted(extractedDir)) {
     onProgress?.call(1.0, 'Using cached weights at ${extractedDir.path}');
     return extractedDir.path;
@@ -665,4 +670,24 @@ double _clampUnitInterval(double value) {
   if (value < 0) return 0;
   if (value > 1) return 1;
   return value;
+}
+
+void _assertSafeModelStoragePath(String targetPath, {required String purpose}) {
+  var cursor = p.normalize(targetPath);
+  while (true) {
+    final hasPubspec = File(p.join(cursor, 'pubspec.yaml')).existsSync();
+    final hasMetadata = File(p.join(cursor, '.metadata')).existsSync();
+    if (hasPubspec && hasMetadata) {
+      throw StateError(
+        'Refusing to $purpose inside Flutter project tree: $targetPath '
+        '(project root: $cursor)',
+      );
+    }
+
+    final parent = p.dirname(cursor);
+    if (parent == cursor) {
+      break;
+    }
+    cursor = parent;
+  }
 }
