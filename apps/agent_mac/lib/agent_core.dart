@@ -178,7 +178,16 @@ Rules:
     String? path;
     try {
       _append('Stopping recorder...');
-      path = await r.stop();
+      path = await r.stop().timeout(const Duration(seconds: 3));
+    } on TimeoutException {
+      _append('Recorder stop timed out — resetting recorder.');
+      // Flip UI state immediately; leak the zombie native recorder and swap
+      // in a fresh Dart-side one so the next Record press works.
+      isRecording = false;
+      recorder = MicRecorder();
+      notifyListeners();
+      unawaited(r.dispose().catchError((_) {}));
+      return null;
     } catch (e, st) {
       _append('Recorder stop failed: $e');
       debugPrint('$st');

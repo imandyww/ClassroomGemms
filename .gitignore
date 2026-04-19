@@ -1,0 +1,25 @@
+.DS_Store
+.dart_tool/
+.pub-cache/
+.pub/
+build/
+
+# Workspace-level lockfile (each pubspec.yaml has its own anyway)
+pubspec.lock
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Native build caches that each app already git-ignores, but keep out at root:
+apps/*/build/
+apps/*/.dart_tool/
+apps/*/ios/Pods/
+apps/*/ios/.symlinks/
+apps/*/ios/Flutter/Flutter.framework
+apps/*/ios/Flutter/Flutter.podspec
+apps/*/macos/Pods/
+apps/*/macos/.symlinks/
+packages/*/.dart_tool/
+packages/*/build/

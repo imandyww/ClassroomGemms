@@ -1,0 +1,26 @@
+name: agent_llm
+description: Shared LLM + STT + HF downloader + ReAct loop for voice-agents-hack-flutter.
+version: 0.0.1
+publish_to: none
+
+environment:
+  sdk: ^3.11.5
+  flutter: ">=1.17.0"
+
+resolution: workspace
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cactus:
+    path: ../cactus_patched
+  agent_protocol:
+    path: ../agent_protocol
+  http: ^1.5.0
+  path: ^1.9.1
+  path_provider: ^2.1.5
+  archive: ^4.0.7
+  record: ^6.1.1
+
+dev_dependencies:
+  flutter_lints: ^6.0.0

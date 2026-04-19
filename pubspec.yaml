@@ -1,0 +1,18 @@
+name: voice_agents_workspace
+publish_to: none
+
+environment:
+  sdk: ^3.11.5
+
+workspace:
+  - apps/voice_ios
+  - apps/agent_mac
+  - packages/agent_protocol
+  - packages/cactus_patched
+  - packages/localsend_common
+  - packages/automation_core
+  - packages/agent_llm
+  - packages/lan_transport
+
+dependency_overrides:
+  path_provider_foundation: 2.5.1
