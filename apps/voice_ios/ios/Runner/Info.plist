@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Voice Ios</string>
+	<string>Classroom Student</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -27,9 +27,9 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Discover and send commands to your paired Mac agent on this network.</string>
+	<string>Connect to your teacher's classroom on this Wi-Fi network to receive lesson prompts and submit answers.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Record voice commands to run on your Mac.</string>
+	<string>Record spoken answers to your teacher's classroom prompts.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_localsend._tcp</string>

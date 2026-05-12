@@ -8,12 +8,17 @@ import 'package:cactus/cactus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:lan_transport/lan_transport.dart';
 
-/// iOS-side client: discover Macs via multicast, send IntentRequests, no server.
+enum StudentPhase { idle, promptReceived, answering, submitting, submitted }
+
+/// Student-side core: discover teacher Macs, host a small HTTP server that the
+/// teacher pushes prompts/control to, capture voice + text answers, run them
+/// through the on-device Gemma for cleanup, and POST them back.
 class IosCore extends ChangeNotifier {
   DeviceIdentity? identity;
   PairingStore? pairing;
   MulticastService? multicast;
   LanAgentClient? client;
+  LanAgentServer? server;
   LmBootstrap? lmBoot;
   SttBootstrap? sttBoot;
   MicRecorder? recorder;
@@ -25,23 +30,16 @@ class IosCore extends ChangeNotifier {
   List<LanPeer> get discoveredPeers => _discovered.values.toList()
     ..sort((a, b) => b.lastSeen.compareTo(a.lastSeen));
 
-  /// Best peer for forwarding a voice intent: prefer paired/trusted Macs, then
-  /// any desktop peer, then the most recently seen peer of any kind.
-  LanPeer? get preferredPeer {
-    final peers = discoveredPeers;
-    if (peers.isEmpty) return null;
-    final trustedDesktop = peers.firstWhere(
-      (p) => p.deviceType == 'desktop' && (pairing?.isTrusted(p.fingerprint) ?? false),
-      orElse: () => peers.firstWhere(
-        (p) => p.deviceType == 'desktop',
-        orElse: () => peers.first,
-      ),
-    );
-    return trustedDesktop;
-  }
+  // --- classroom session state ---
+  StudentPhase phase = StudentPhase.idle;
+  LessonPrompt? currentPrompt;
+  LanPeer? teacherPeer;
+  String draftText = '';
+  bool audioUsed = false;
+  String? hintText;
+  String? currentLessonId;
 
   final List<String> log = [];
-  IntentResponse? lastResponse;
   String status = 'idle';
 
   void _append(String line) {
@@ -52,7 +50,7 @@ class IosCore extends ChangeNotifier {
   }
 
   Future<void> bootstrap() async {
-    identity = await DeviceIdentity.loadOrCreate(defaultAlias: 'iPhone-Agent');
+    identity = await DeviceIdentity.loadOrCreate(defaultAlias: 'Student-${Platform.localHostname}');
     pairing = await PairingStore.open();
     client = LanAgentClient(identity: identity!);
     lmBoot = LmBootstrap(tier: DeviceTier.phone);
@@ -75,6 +73,25 @@ class IosCore extends ChangeNotifier {
       _append('Multicast listener up on :${LanConst.port}');
     } catch (e) {
       _append('Multicast failed: $e');
+    }
+
+    server = LanAgentServer(
+      identity: identity!,
+      pairing: pairing!,
+      onPrompt: _handlePromptArrived,
+      onControl: _handleControlArrived,
+      // In a classroom the student trusts whatever teacher reaches them first;
+      // there's no separate approval UI on the phone.
+      onPendingPair: (peer) async {
+        _append('Auto-trusting incoming teacher ${peer.alias}.');
+        return true;
+      },
+    );
+    try {
+      await server!.start();
+      _append('Student server listening on :${LanConst.port}');
+    } catch (e) {
+      _append('Server start failed: $e');
     }
     notifyListeners();
   }
@@ -115,7 +132,7 @@ class IosCore extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<String?> stopRecordingAndTranscribe() async {
+  Future<String?> _stopAndTranscribe() async {
     final r = recorder;
     final stt = sttBoot;
     if (r == null || stt == null) return null;
@@ -160,59 +177,170 @@ class IosCore extends ChangeNotifier {
     }
   }
 
-  static const _forwardSystemPrompt = '''
-You sit between the user's voice and a desktop automation agent. Your only job is to call the tool `forward_to_mac(intent)` with a clean, imperative restatement of what the user wants done on their Mac. Preserve all the user's details (app names, URLs, exact text to type) — do not summarize away content. Do not answer the user yourself; always call the tool.
+  static const _cleanupSystemPrompt = '''
+You are an editing assistant on a student's phone. The student just spoke an answer to a teacher's classroom prompt. Rewrite their transcript into a tighter version: remove filler ("um", "like", "you know"), fix obvious speech-to-text errors, keep the student's voice, and preserve every factual claim. Do not add information the student did not say. Return only the cleaned answer, no preamble.
 ''';
 
-  static final _forwardTool = CactusTool(
-    name: 'forward_to_mac',
-    description: 'Forward a cleaned intent to the Mac agent for execution.',
-    parameters: ToolParametersSchema(
-      properties: {
-        'intent': ToolParameter(
-          type: 'string',
-          description: 'Imperative description of the task to run on the Mac.',
-          required: true,
-        ),
-      },
-    ),
-  );
+  /// Stop recording, transcribe with Whisper, run a one-shot Gemma cleanup,
+  /// and append the result to the draft answer.
+  Future<void> appendVoice() async {
+    final transcript = await _stopAndTranscribe();
+    if (transcript == null || transcript.trim().isEmpty) return;
+    final cleaned = await _cleanupAnswer(transcript);
+    audioUsed = true;
+    draftText = draftText.isEmpty ? cleaned : '${draftText.trim()} $cleaned';
+    if (phase == StudentPhase.promptReceived) phase = StudentPhase.answering;
+    notifyListeners();
+  }
 
-  /// If an iOS model is loaded, run a one-shot tool-calling pass so Gemma can
-  /// clean up the phrasing before forwarding. Otherwise, forward the raw text.
-  Future<String> _normalizeIntent(String raw) async {
+  Future<String> _cleanupAnswer(String raw) async {
     final boot = lmBoot;
     if (boot == null || loadedModel == null) return raw;
     try {
       final result = await boot.lm.generateCompletion(
         messages: [
-          ChatMessage(role: 'system', content: _forwardSystemPrompt),
+          ChatMessage(role: 'system', content: _cleanupSystemPrompt),
           ChatMessage(role: 'user', content: raw),
         ],
-        params: CactusCompletionParams(
-          tools: [_forwardTool],
-          forceTools: true,
-          maxTokens: 256,
-        ),
+        params: CactusCompletionParams(maxTokens: 256),
       );
-      if (result.toolCalls.isNotEmpty) {
-        final call = result.toolCalls.first;
-        final cleaned = call.arguments['intent'];
-        if (cleaned is String && cleaned.trim().isNotEmpty) {
-          _append('Normalized: "$cleaned"');
-          return cleaned;
-        }
-      }
+      final cleaned = result.text.trim();
+      if (cleaned.isEmpty) return raw;
+      _append('Cleaned: "$cleaned"');
+      return cleaned;
     } catch (e) {
-      _append('Normalization failed: $e (forwarding raw text)');
+      _append('Cleanup failed: $e (using raw transcript)');
+      return raw;
     }
-    return raw;
   }
 
-  /// Manually add a Mac peer by IP, bypassing multicast. Useful when iOS is
-  /// running in the Simulator (which can't cross multicast) or when the LAN
-  /// drops UDP. Probes /api/localsend/v2/info to grab the peer's real
-  /// fingerprint/alias before injecting it.
+  static const _hintSystemPrompt = '''
+You are a hint helper running privately on a student's phone. The teacher cannot see what you say. The student is stuck on a classroom prompt. Give a single small nudge — a question, an analogy, or a recall of a related concept — that helps them think. Never give the answer outright. Keep it under two sentences.
+''';
+
+  /// Local-only: ask the on-device Gemma for a hint scoped to the current
+  /// prompt + draft. Never sent to the teacher.
+  Future<void> askHint() async {
+    final boot = lmBoot;
+    final prompt = currentPrompt;
+    if (boot == null || loadedModel == null || prompt == null) {
+      hintText = 'Hint unavailable (model not loaded).';
+      notifyListeners();
+      return;
+    }
+    hintText = '...thinking';
+    notifyListeners();
+    try {
+      final result = await boot.lm.generateCompletion(
+        messages: [
+          ChatMessage(role: 'system', content: _hintSystemPrompt),
+          ChatMessage(
+            role: 'user',
+            content: 'Prompt: ${prompt.text}\nMy draft so far: $draftText',
+          ),
+        ],
+        params: CactusCompletionParams(maxTokens: 200),
+      );
+      hintText = result.text.trim();
+    } catch (e) {
+      hintText = 'Hint failed: $e';
+    }
+    notifyListeners();
+  }
+
+  void updateDraft(String text) {
+    draftText = text;
+    if (phase == StudentPhase.promptReceived && text.isNotEmpty) {
+      phase = StudentPhase.answering;
+    }
+    notifyListeners();
+  }
+
+  Future<void> submitAnswer() async {
+    final prompt = currentPrompt;
+    final peer = teacherPeer;
+    final id = identity;
+    final c = client;
+    if (prompt == null || peer == null || id == null || c == null) {
+      _append('Cannot submit: missing prompt or teacher peer.');
+      return;
+    }
+    if (draftText.trim().isEmpty) {
+      _append('Nothing to submit.');
+      return;
+    }
+    phase = StudentPhase.submitting;
+    notifyListeners();
+
+    final resp = StudentResponse(
+      lessonId: prompt.lessonId,
+      stepId: prompt.stepId,
+      studentFingerprint: id.fingerprint,
+      studentAlias: id.alias,
+      text: draftText.trim(),
+      audioWasUsed: audioUsed,
+      submittedAtMs: DateTime.now().millisecondsSinceEpoch,
+    );
+    final ok = await c.submitResponse(peer: peer, response: resp);
+    if (ok) {
+      _append('Submitted answer to ${peer.alias}.');
+      phase = StudentPhase.submitted;
+    } else {
+      _append('Submit failed; try again.');
+      phase = StudentPhase.answering;
+    }
+    notifyListeners();
+  }
+
+  Future<void> _handlePromptArrived(LessonPrompt prompt, LanPeer from) async {
+    _append('Prompt step ${prompt.stepIndex + 1}/${prompt.totalSteps} from ${from.alias}: "${prompt.text}"');
+    currentPrompt = prompt;
+    teacherPeer = from;
+    currentLessonId = prompt.lessonId;
+    draftText = '';
+    audioUsed = false;
+    hintText = null;
+    phase = StudentPhase.promptReceived;
+    // Remember this teacher so we know who to send responses to.
+    if (!(pairing?.isTrusted(from.fingerprint) ?? false)) {
+      await pairing?.trust(from);
+    }
+    _discovered[from.fingerprint] = from;
+    notifyListeners();
+  }
+
+  Future<void> _handleControlArrived(ClassroomControl ctrl, LanPeer from) async {
+    _append('Control ${ctrl.action.name} from ${from.alias}.');
+    switch (ctrl.action) {
+      case ControlAction.startLesson:
+        currentLessonId = ctrl.lessonId;
+        teacherPeer = from;
+        draftText = '';
+        audioUsed = false;
+        hintText = null;
+        currentPrompt = null;
+        phase = StudentPhase.idle;
+        break;
+      case ControlAction.endLesson:
+      case ControlAction.clearStep:
+        currentPrompt = null;
+        draftText = '';
+        audioUsed = false;
+        hintText = null;
+        phase = StudentPhase.idle;
+        if (ctrl.action == ControlAction.endLesson) currentLessonId = null;
+        break;
+      case ControlAction.advanceStep:
+        // The actual new prompt arrives via /classroom/v1/prompt; this is
+        // informational only.
+        break;
+    }
+    notifyListeners();
+  }
+
+  /// Manually add a teacher peer by IP, bypassing multicast (useful in the
+  /// iOS Simulator, which can't cross multicast). Probes /info to grab the
+  /// peer's real fingerprint/alias.
   Future<bool> addManualPeer(String ipInput) async {
     final ip = ipInput.trim();
     if (ip.isEmpty) {
@@ -240,6 +368,7 @@ You sit between the user's voice and a desktop automation agent. Your only job i
         lastSeen: DateTime.now(),
       );
       _discovered[peer.fingerprint] = peer;
+      await pairing?.trust(peer);
       _append('Added manual peer ${peer.alias} @ ${peer.ip}');
       notifyListeners();
       return true;
@@ -251,33 +380,10 @@ You sit between the user's voice and a desktop automation agent. Your only job i
     }
   }
 
-  Future<IntentResponse?> sendIntentTo(LanPeer peer, String text) async {
-    final c = client;
-    final id = identity;
-    if (c == null || id == null) return null;
-    final normalized = await _normalizeIntent(text);
-    _append('-> ${peer.alias}: $normalized');
-    final req = IntentRequest.create(text: normalized, sourceDevice: id.alias);
-    final res = await c.sendIntent(peer: peer, request: req);
-    if (res.success) {
-      lastResponse = res.response;
-      _append('<- ${res.response?.text}');
-      // Trust peer if the response came back — means they trusted us, so we trust them.
-      if (!(pairing?.isTrusted(peer.fingerprint) ?? false)) {
-        await pairing?.trust(peer);
-      }
-      notifyListeners();
-      return res.response;
-    } else {
-      _append('Send failed: ${res.error}');
-      notifyListeners();
-      return null;
-    }
-  }
-
   @override
   void dispose() {
     multicast?.stop();
+    server?.stop();
     super.dispose();
   }
 }

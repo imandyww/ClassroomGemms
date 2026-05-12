@@ -22,8 +22,13 @@ class AgentSendResult {
 class LanAgentClient {
   final DeviceIdentity identity;
   final Duration timeout;
+  final Duration classroomTimeout;
 
-  LanAgentClient({required this.identity, this.timeout = const Duration(minutes: 2)});
+  LanAgentClient({
+    required this.identity,
+    this.timeout = const Duration(minutes: 2),
+    this.classroomTimeout = const Duration(seconds: 5),
+  });
 
   Future<AgentSendResult> sendIntent({
     required LanPeer peer,
@@ -34,11 +39,7 @@ class LanAgentClient {
       final resp = await http
           .post(
             uri,
-            headers: {
-              'content-type': 'application/json',
-              'x-lan-fingerprint': identity.fingerprint,
-              'x-lan-alias': identity.alias,
-            },
+            headers: _headers(),
             body: jsonEncode(request.toJson()),
           )
           .timeout(timeout);
@@ -51,4 +52,43 @@ class LanAgentClient {
       return AgentSendResult(success: false, error: e.toString());
     }
   }
+
+  /// Teacher → student: push the current step's prompt.
+  Future<bool> pushPrompt({
+    required LanPeer peer,
+    required LessonPrompt prompt,
+  }) =>
+      _postClassroom(peer, LanConst.classroomPromptPath, prompt.toJson());
+
+  /// Student → teacher: submit an answer for the current step.
+  Future<bool> submitResponse({
+    required LanPeer peer,
+    required StudentResponse response,
+  }) =>
+      _postClassroom(peer, LanConst.classroomResponsePath, response.toJson());
+
+  /// Teacher → student: start / advance / end the lesson.
+  Future<bool> sendControl({
+    required LanPeer peer,
+    required ClassroomControl control,
+  }) =>
+      _postClassroom(peer, LanConst.classroomControlPath, control.toJson());
+
+  Future<bool> _postClassroom(LanPeer peer, String path, Map<String, dynamic> body) async {
+    final uri = Uri.parse('${peer.baseUrl}$path');
+    try {
+      final resp = await http
+          .post(uri, headers: _headers(), body: jsonEncode(body))
+          .timeout(classroomTimeout);
+      return resp.statusCode == 200 || resp.statusCode == 202;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Map<String, String> _headers() => {
+        'content-type': 'application/json',
+        'x-lan-fingerprint': identity.fingerprint,
+        'x-lan-alias': identity.alias,
+      };
 }

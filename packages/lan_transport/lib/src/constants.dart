@@ -14,5 +14,13 @@ class LanConst {
   static const String uploadPath = '/api/localsend/v2/upload';
 
   // Our own endpoint — carries IntentRequest/IntentResponse as JSON.
+  // Kept in place during the classroom-app migration; remove once both
+  // apps stop using it.
   static const String agentIntentPath = '/agent/v1/intent';
+
+  // Classroom: teacher → student push (prompts, control) and student → teacher
+  // (responses). Fire-and-forget JSON POSTs; session state lives in the app.
+  static const String classroomPromptPath = '/classroom/v1/prompt';
+  static const String classroomResponsePath = '/classroom/v1/response';
+  static const String classroomControlPath = '/classroom/v1/control';
 }
