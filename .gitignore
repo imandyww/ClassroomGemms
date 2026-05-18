@@ -1,0 +1,43 @@
+# Workspace caches and generated artifacts
+.DS_Store
+.dart_tool/
+.dart-tool/
+.dartServer/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+build/
+coverage/
+.demo-models/
+
+# Workspace-level lockfile (each app/package keeps its own)
+pubspec.lock
+
+# Local tooling settings
+.claude/settings.local.json
+
+# IDEs
+.idea/
+.vscode/
+*.iml
+
+# Package and app outputs
+apps/*/build/
+apps/*/.dart_tool/
+packages/*/build/
+packages/*/.dart_tool/
+
+# Apple and Flutter native caches
+apps/*/ios/Pods/
+apps/*/ios/.symlinks/
+apps/*/ios/Flutter/ephemeral/
+apps/*/ios/Flutter/Flutter.framework
+apps/*/ios/Flutter/Flutter.podspec
+apps/*/macos/Pods/
+apps/*/macos/.symlinks/
+apps/*/macos/Flutter/ephemeral/
+apps/*/macos/Flutter/Flutter.framework
+apps/*/macos/Flutter/Flutter.podspec
+apps/*/*.xcodeproj/xcuserdata/
+apps/*/*.xcworkspace/xcuserdata/

@@ -1,0 +1,26 @@
+name: lan_transport
+description: LocalSend-inspired LAN transport (HTTP + multicast discovery + pairing) for voice-agents-hack-flutter.
+version: 0.0.1
+publish_to: none
+
+environment:
+  sdk: ^3.11.5
+  flutter: ">=1.17.0"
+
+resolution: workspace
+
+dependencies:
+  flutter:
+    sdk: flutter
+  agent_protocol:
+    path: ../agent_protocol
+  http: ^1.5.0
+  shelf: ^1.4.1
+  shelf_router: ^1.1.4
+  path_provider: ^2.1.5
+  shared_preferences: ^2.5.3
+  path: ^1.9.1
+  uuid: ^4.4.0
+
+dev_dependencies:
+  flutter_lints: ^6.0.0

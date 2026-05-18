@@ -1,0 +1,84 @@
+import 'dart:ffi';
+import 'dart:io' show File, Platform;
+import 'package:cactus/src/models/binding.dart';
+import 'package:ffi/ffi.dart';
+import 'package:path/path.dart' as p;
+
+String _getLibraryPath(String libName) {
+  if (Platform.isIOS || Platform.isMacOS) {
+    return '$libName.framework/$libName';
+  }
+  if (Platform.isAndroid) {
+    return 'lib$libName.so';
+  }
+  throw UnsupportedError('Unsupported platform: ${Platform.operatingSystem}');
+}
+
+final DynamicLibrary cactusLib = DynamicLibrary.open(_getLibraryPath('cactus'));
+
+final cactusInit = cactusLib
+    .lookup<NativeFunction<CactusInitNative>>('cactus_init')
+    .asFunction<CactusInitDart>();
+
+final cactusGetLastError = cactusLib
+    .lookup<NativeFunction<CactusGetLastErrorNative>>('cactus_get_last_error')
+    .asFunction<CactusGetLastErrorDart>();
+
+final cactusComplete = cactusLib
+    .lookup<NativeFunction<CactusCompleteNative>>('cactus_complete')
+    .asFunction<CactusCompleteDart>();
+
+final cactusDestroy = cactusLib
+    .lookup<NativeFunction<CactusDestroyNative>>('cactus_destroy')
+    .asFunction<CactusDestroyDart>();
+
+final cactusReset = cactusLib
+    .lookup<NativeFunction<CactusResetNative>>('cactus_reset')
+    .asFunction<CactusResetDart>();
+
+final cactusEmbed = cactusLib
+    .lookup<NativeFunction<CactusEmbedNative>>('cactus_embed')
+    .asFunction<CactusEmbedDart>();
+
+final cactusTranscribe = cactusLib
+    .lookup<NativeFunction<CactusTranscribeNative>>('cactus_transcribe')
+    .asFunction<CactusTranscribeDart>();
+
+final DynamicLibrary cactusUtil = DynamicLibrary.open(
+  _getLibraryPath('cactus_util'),
+);
+
+final registerApp = cactusUtil
+    .lookup<NativeFunction<RegisterAppNative>>('register_app')
+    .asFunction<RegisterAppDart>();
+
+final setAndroidDataDirectory = cactusUtil
+    .lookup<NativeFunction<Void Function(Pointer<Utf8>)>>(
+      'set_android_data_directory',
+    )
+    .asFunction<void Function(Pointer<Utf8>)>();
+
+final getDeviceId = cactusUtil
+    .lookup<NativeFunction<GetDeviceIdNative>>('get_device_id')
+    .asFunction<GetDeviceIdDart>();
+
+String? resolveCactusLibraryPath() {
+  if (!Platform.isIOS && !Platform.isMacOS) {
+    return null;
+  }
+
+  final frameworksDir = p.normalize(
+    p.join(p.dirname(Platform.resolvedExecutable), '..', 'Frameworks'),
+  );
+  final candidates = [
+    p.join(frameworksDir, 'cactus.framework', 'cactus'),
+    p.join(frameworksDir, 'cactus.framework', 'Versions', 'A', 'cactus'),
+  ];
+
+  for (final candidate in candidates) {
+    if (File(candidate).existsSync()) {
+      return candidate;
+    }
+  }
+  return null;
+}

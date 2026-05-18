@@ -1,0 +1,98 @@
+                       PHOTOSYNTHESIS: HOW PLANTS MAKE FOOD
+                       7th Grade Life Science -- Handout 1
+
+Overview
+--------
+Photosynthesis is the process plants, algae, and some bacteria use to
+convert light energy into chemical energy stored in sugar. It is the
+foundation of nearly every food chain on Earth: without it, animals
+(including us) would have no food to eat and no oxygen to breathe.
+
+The Word Equation
+-----------------
+            light energy
+  6 CO2 + 6 H2O  --------->  C6H12O6  +  6 O2
+  (carbon dioxide + water)   (glucose)   (oxygen)
+
+In plain English: a plant pulls in carbon dioxide from the air and water
+from the soil. Using sunlight as the energy source, it rearranges those
+atoms into a sugar molecule (glucose) and releases oxygen as a waste
+product. The plant uses the sugar for growth, repair, and to make other
+molecules such as starch, cellulose, fats, and proteins.
+
+Where It Happens
+----------------
+Photosynthesis takes place mostly in the leaves, inside small green
+structures called CHLOROPLASTS. Chloroplasts contain a pigment called
+CHLOROPHYLL, which absorbs red and blue light strongly and reflects
+green light -- that is why leaves look green to our eyes.
+
+A leaf is built like a tiny solar factory:
+  - The waxy upper surface (cuticle) limits water loss.
+  - Pores on the underside (stomata) let CO2 in and O2 out.
+  - Veins carry water up from the roots and sugar back to the rest
+    of the plant.
+
+The Two Stages
+--------------
+Photosynthesis is really two linked sets of reactions.
+
+  1) Light-dependent reactions (in the thylakoid membranes):
+     Sunlight splits water molecules. This releases oxygen, produces
+     energy carriers called ATP and NADPH, and is the only step that
+     directly uses light.
+
+  2) Light-independent reactions, also called the Calvin cycle
+     (in the stroma): The ATP and NADPH from stage 1 power a series
+     of reactions that "fix" CO2 into sugar. These reactions do not
+     need light directly, but they need the products of stage 1, so
+     they slow down at night.
+
+Factors That Change the Rate
+----------------------------
+The rate of photosynthesis -- how fast a plant makes sugar -- depends on
+three main factors:
+
+  * LIGHT INTENSITY. More light usually means more photosynthesis, up
+    to a saturation point where the chloroplasts can't keep up.
+  * CARBON DIOXIDE CONCENTRATION. Higher CO2 in the air boosts the rate
+    until other factors become limiting. Greenhouse growers sometimes
+    enrich CO2 for this reason.
+  * TEMPERATURE. The enzymes that run the Calvin cycle work best in a
+    middle range (roughly 20-35 degrees C for most plants). Too cold
+    and they slow down; too hot and they denature.
+
+Water availability also matters: when a plant runs short on water it
+closes its stomata to conserve moisture, but that also cuts off the CO2
+supply, so photosynthesis stalls.
+
+Why It Matters
+--------------
+Photosynthesis is the link between the sun and almost every living
+thing.
+  - The OXYGEN we breathe comes from photosynthesis in plants, algae,
+    and cyanobacteria.
+  - The FOOD ENERGY in everything we eat -- fruit, bread, beef, fish --
+    can be traced back to a plant or alga that captured sunlight.
+  - The CARBON CYCLE depends on photosynthesis pulling CO2 out of the
+    atmosphere; this is why forests and oceans are called "carbon
+    sinks."
+
+Key Vocabulary
+--------------
+chloroplast .... organelle where photosynthesis takes place
+chlorophyll .... green pigment that absorbs light
+stomata ........ pores on a leaf that let gases in and out
+glucose ........ simple sugar produced by photosynthesis
+Calvin cycle ... light-independent stage that builds sugar from CO2
+ATP / NADPH .... energy carriers made in the light-dependent stage
+
+Quick Check
+-----------
+1. Where in the plant cell does photosynthesis occur?
+2. What two raw materials does a plant combine to make glucose?
+3. Why do leaves look green?
+4. Name two factors that can speed up or slow down the rate of
+   photosynthesis, and explain why each one matters.
+5. In one sentence, describe how the energy stored in a hamburger
+   originally came from the sun.

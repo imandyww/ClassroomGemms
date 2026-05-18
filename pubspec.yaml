@@ -1,0 +1,22 @@
+name: voice_agents_workspace
+publish_to: none
+
+environment:
+  sdk: ^3.11.5
+
+workspace:
+  - apps/voice_ios
+  - apps/agent_mac
+  - packages/agent_protocol
+  - packages/cactus_patched
+  - packages/localsend_common
+  - packages/automation_core
+  - packages/agent_llm
+  - packages/lan_transport
+
+dependency_overrides:
+  # 12.4.0 references NSProcessInfo.isiOSAppOnVision, which is unavailable in
+  # the current local iOS SDK used for simulator builds.
+  device_info_plus: 11.5.0
+  flutter_rust_bridge: 2.11.1
+  path_provider_foundation: 2.5.1
