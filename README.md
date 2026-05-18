@@ -244,15 +244,6 @@ and `CactusSTT` (Whisper speech-to-text) as plain Dart APIs over a native
 their model through the same Cactus pipeline; no remote endpoint, no per-token
 API bill, no SaaS dependency for class to start.
 
-We ship Cactus as a vendored `packages/cactus_patched` fork so we can:
-
-- **Bypass the Cactus model registry** with a direct `modelPath` so weights
-  load from a pre-extracted directory (the demo flow drops `gemma-4-e2b-it`
-  into the iOS app sandbox and the Mac app support dir — Cactus initializes
-  straight from there, no slug lookup, no re-download).
-- **Pin quantization** to the exact int4 Gemma-4 build we tested against,
-  instead of letting the registry pick a default.
-
 The models themselves are Google's **Gemma 4** family:
 
 | Device | Model | Why |
